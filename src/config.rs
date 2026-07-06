@@ -198,8 +198,8 @@ impl Default for HotkeysConfig {
             seek_forward_large: "Shift+Right".into(),
             seek_back_fine: "Alt+Left".into(),
             seek_forward_fine: "Alt+Right".into(),
-            waveform_zoom_in: "Shift+Up".into(),
-            waveform_zoom_out: "Shift+Down".into(),
+            waveform_zoom_in: "Ctrl+PageUp".into(),
+            waveform_zoom_out: "Ctrl+PageDown".into(),
             vscale_increase: "Alt+Up".into(),
             vscale_decrease: "Alt+Down".into(),
             volume_up: "Up".into(),
@@ -250,20 +250,14 @@ pub struct Config {
 }
 
 impl Config {
-    /// Load configuration. If `explicit` is given, that file must parse; missing
-    /// files (explicit or default) fall back to built-in defaults.
+    /// Load configuration. An explicit `--config` path (if it exists) wins;
+    /// otherwise the first existing file in [`candidate_paths`] is used. A
+    /// missing file (explicit or discovered) falls back to built-in defaults; an
+    /// existing file that fails to parse is an error.
     pub fn load(explicit: Option<&Path>) -> Result<Config, Box<dyn Error>> {
-        let path = match explicit {
-            Some(p) => Some(p.to_path_buf()),
-            None => default_config_path(),
-        };
-
-        let Some(path) = path else {
+        let Some(path) = Self::resolve_path(explicit) else {
             return Ok(Config::default());
         };
-        if !path.exists() {
-            return Ok(Config::default());
-        }
 
         let text = std::fs::read_to_string(&path)
             .map_err(|e| format!("reading config '{}': {e}", path.display()))?;
@@ -271,23 +265,42 @@ impl Config {
             .map_err(|e| format!("parsing config '{}': {e}", path.display()))?;
         Ok(config)
     }
+
+    /// The config file that [`load`](Self::load) would use, if any exists.
+    pub fn resolve_path(explicit: Option<&Path>) -> Option<PathBuf> {
+        match explicit {
+            Some(p) if p.exists() => Some(p.to_path_buf()),
+            Some(_) => None,
+            None => candidate_paths().into_iter().find(|p| p.exists()),
+        }
+    }
 }
 
-/// `$XDG_CONFIG_HOME/wavfomo/config.toml`, falling back to
-/// `~/.config/wavfomo/config.toml`.
-fn default_config_path() -> Option<PathBuf> {
+/// Config-file search locations, highest priority first:
+///
+/// 1. `./wavfomo.config` (current directory)
+/// 2. `~/.wavfomo.config`
+/// 3. `$XDG_CONFIG_HOME/wavfomo/config.toml`
+/// 4. `~/.config/wavfomo/config.toml`
+fn candidate_paths() -> Vec<PathBuf> {
+    let mut paths = vec![PathBuf::from("wavfomo.config")];
+
+    let home = std::env::var("HOME").ok().filter(|h| !h.is_empty());
+    if let Some(home) = &home {
+        paths.push(PathBuf::from(home).join(".wavfomo.config"));
+    }
     if let Ok(x) = std::env::var("XDG_CONFIG_HOME")
-        && !x.is_empty() {
-            return Some(PathBuf::from(x).join("wavfomo").join("config.toml"));
-        }
-    if let Ok(home) = std::env::var("HOME")
-        && !home.is_empty() {
-            return Some(
-                PathBuf::from(home)
-                    .join(".config")
-                    .join("wavfomo")
-                    .join("config.toml"),
-            );
-        }
-    None
+        && !x.is_empty()
+    {
+        paths.push(PathBuf::from(x).join("wavfomo").join("config.toml"));
+    }
+    if let Some(home) = &home {
+        paths.push(
+            PathBuf::from(home)
+                .join(".config")
+                .join("wavfomo")
+                .join("config.toml"),
+        );
+    }
+    paths
 }

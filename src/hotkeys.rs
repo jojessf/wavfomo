@@ -85,7 +85,19 @@ fn parse_key(k: &str) -> Result<KeyCode, String> {
         "enter" | "return" => KeyCode::Enter,
         "tab" => KeyCode::Tab,
         "backspace" => KeyCode::Backspace,
+        "pageup" | "pgup" => KeyCode::PageUp,
+        "pagedown" | "pgdn" => KeyCode::PageDown,
+        "home" => KeyCode::Home,
+        "end" => KeyCode::End,
+        "insert" | "ins" => KeyCode::Insert,
+        "delete" | "del" => KeyCode::Delete,
         other => {
+            // Function keys: f1..f24.
+            if let Some(rest) = other.strip_prefix('f')
+                && let Ok(n) = rest.parse::<u8>()
+            {
+                return Ok(KeyCode::F(n));
+            }
             let mut chars = other.chars();
             match (chars.next(), chars.next()) {
                 (Some(c), None) => KeyCode::Char(c),

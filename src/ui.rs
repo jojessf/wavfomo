@@ -242,7 +242,7 @@ fn draw_playhead(
 }
 
 fn draw_footer(frame: &mut Frame, area: Rect) {
-    let hint = "Space play/pause  ·  s stop  ·  ←→ seek (Shift ±10s, Alt ±0.1s)  ·  ↑↓ vol (Shift zoom, Alt vscale)  ·  m mute  ·  q quit";
+    let hint = "Space play/pause  ·  s stop  ·  ←→ seek (Shift ±10s, Alt ±0.1s)  ·  ↑↓ vol  ·  Ctrl+PgUp/PgDn zoom  ·  Alt+↑↓ vscale  ·  m mute  ·  q quit";
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
             hint,

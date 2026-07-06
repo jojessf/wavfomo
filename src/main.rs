@@ -7,10 +7,15 @@ mod dsp;
 mod hotkeys;
 mod ui;
 
+use std::io::stdout;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::Parser;
+use crossterm::event::{
+    KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+};
+use crossterm::execute;
 
 use app::App;
 use config::Config;
@@ -35,12 +40,23 @@ struct Cli {
     no_viz: bool,
 
     /// Initial volume, 0–100.
-    #[arg(short, long, value_name = "0-100")]
+    #[arg(long, visible_alias = "vol", value_name = "0-100")]
     volume: Option<u8>,
+
+    /// Print extra diagnostic output.
+    #[arg(short = 'v', long)]
+    verbose: bool,
 }
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+
+    if cli.verbose {
+        match Config::resolve_path(cli.config.as_deref()) {
+            Some(p) => eprintln!("config: {}", p.display()),
+            None => eprintln!("config: built-in defaults (no file found)"),
+        }
+    }
 
     // Load config (built-in defaults if no file), then apply CLI overrides.
     let mut config = match Config::load(cli.config.as_deref()) {
@@ -79,8 +95,27 @@ fn main() -> ExitCode {
         }
     };
 
+    if cli.verbose {
+        let a = &application.audio;
+        eprintln!(
+            "loaded: {} — {} Hz, {} ch, {:.1}s, {} spectrogram frames",
+            cli.file.display(),
+            a.sample_rate,
+            a.channels,
+            a.duration.as_secs_f32(),
+            application.spectrogram.as_ref().map_or(0, |s| s.frames.len()),
+        );
+    }
+
     let mut terminal = ratatui::init();
+    // Ask the terminal to disambiguate modified keys (Shift+Arrow, etc.) via the
+    // enhanced keyboard protocol, where supported. Without this, many terminals
+    // don't deliver Shift+↑/↓ to the app at all.
+    let enhanced = enable_keyboard_enhancement();
     let result = application.run(&mut terminal);
+    if enhanced {
+        let _ = execute!(stdout(), PopKeyboardEnhancementFlags);
+    }
     ratatui::restore();
 
     if let Err(e) = result {
@@ -88,4 +123,17 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
     ExitCode::SUCCESS
+}
+
+/// Enable the enhanced keyboard protocol if the terminal supports it. Returns
+/// whether flags were pushed (so they can be popped on exit).
+fn enable_keyboard_enhancement() -> bool {
+    match crossterm::terminal::supports_keyboard_enhancement() {
+        Ok(true) => execute!(
+            stdout(),
+            PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+        )
+        .is_ok(),
+        _ => false,
+    }
 }
