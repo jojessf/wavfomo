@@ -152,10 +152,6 @@ impl Engine {
         let _ = self.player.try_seek(Duration::from_secs_f32(target));
     }
 
-    pub fn seek_to(&self, pos: Duration) {
-        let _ = self.player.try_seek(pos);
-    }
-
     pub fn volume_percent(&self) -> u8 {
         (self.volume * 100.0).round() as u8
     }

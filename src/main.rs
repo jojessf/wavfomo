@@ -4,53 +4,74 @@ mod app;
 mod audio;
 mod config;
 mod dsp;
+mod hotkeys;
 mod ui;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+use clap::Parser;
+
 use app::App;
 use config::Config;
 
-const USAGE: &str = "\
-wavfomo — terminal audio player
+/// Terminal audio player with waveform and spectrograph visualizers.
+#[derive(Parser, Debug)]
+#[command(name = "wavfomo", version, about)]
+struct Cli {
+    /// Audio file to play (WAV, FLAC, Ogg Vorbis, MP3).
+    file: PathBuf,
 
-USAGE:
-    wavfomo <FILE>
+    /// Use a specific config file (overrides the default path).
+    #[arg(long, value_name = "PATH")]
+    config: Option<PathBuf>,
 
-ARGS:
-    <FILE>    Audio file to play (WAV, FLAC, Ogg Vorbis, MP3)
+    /// FFT window size for the spectrograph (power of two).
+    #[arg(long, value_name = "N")]
+    fft_size: Option<usize>,
 
-Full CLI options and config-file support are coming; see README.md.";
+    /// Disable both visualizers for this run.
+    #[arg(long)]
+    no_viz: bool,
+
+    /// Initial volume, 0–100.
+    #[arg(short, long, value_name = "0-100")]
+    volume: Option<u8>,
+}
 
 fn main() -> ExitCode {
-    // Minimal argument handling for now (a full clap-based CLI + TOML config
-    // are pending dependency approval — see README).
-    let mut args = std::env::args().skip(1);
-    let first = args.next();
+    let cli = Cli::parse();
 
-    let path = match first.as_deref() {
-        None | Some("-h") | Some("--help") => {
-            println!("{USAGE}");
-            return ExitCode::SUCCESS;
+    // Load config (built-in defaults if no file), then apply CLI overrides.
+    let mut config = match Config::load(cli.config.as_deref()) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return ExitCode::FAILURE;
         }
-        Some("-V") | Some("--version") => {
-            println!("wavfomo {}", env!("CARGO_PKG_VERSION"));
-            return ExitCode::SUCCESS;
-        }
-        Some(p) => PathBuf::from(p),
     };
 
-    if !path.exists() {
-        eprintln!("error: file not found: {}", path.display());
+    if let Some(v) = cli.volume {
+        config.audio.volume = v.min(100);
+    }
+    if let Some(n) = cli.fft_size {
+        config.spectrograph.fft_size = n;
+    }
+    if cli.no_viz {
+        config.waveform.show = false;
+        config.waveform.generate = false;
+        config.spectrograph.show = false;
+        config.spectrograph.generate = false;
+    }
+
+    if !cli.file.exists() {
+        eprintln!("error: file not found: {}", cli.file.display());
         return ExitCode::FAILURE;
     }
 
-    let config = Config::default();
-
     // Decode + precompute happen here, before entering the TUI, so any failure
     // is reported as a plain CLI error.
-    let mut application = match App::load(config, &path) {
+    let mut application = match App::load(config, &cli.file) {
         Ok(app) => app,
         Err(e) => {
             eprintln!("error: {e}");

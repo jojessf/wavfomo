@@ -171,7 +171,7 @@ fn draw_spectrogram(frame: &mut Frame, area: Rect, app: &App) {
     let bins = spec.bins.max(1);
     let w = inner.width as usize;
     let h = inner.height as usize;
-    let log_freq = app.config.spectrograph.log_frequency;
+    let log_freq = app.config.spectrograph.log_frequency();
     let buf = frame.buffer_mut();
 
     for cx in 0..w {

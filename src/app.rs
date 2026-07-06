@@ -1,14 +1,16 @@
 //! Application state, input handling, and the main event loop.
 
+use std::error::Error;
 use std::io;
 use std::path::Path;
 use std::time::Duration;
 
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{self, Event, KeyEvent, KeyEventKind};
 
-use crate::audio::{self, AudioData, AudioError, Engine};
+use crate::audio::{self, AudioData, Engine};
 use crate::config::{Config, Zoom};
 use crate::dsp::{self, Spectrogram};
+use crate::hotkeys::{self, Action, Keymap};
 use crate::ui;
 
 const VOLUME_STEP: i32 = 5;
@@ -23,12 +25,14 @@ pub struct App {
     /// Horizontal zoom factor, 1.0 == fit whole file.
     pub zoom: f32,
     pub vertical_scale: f32,
+    keymap: Keymap,
     should_quit: bool,
 }
 
 impl App {
     /// Decode the file, precompute visualizer data, and open the audio device.
-    pub fn load(config: Config, path: &Path) -> Result<Self, AudioError> {
+    pub fn load(config: Config, path: &Path) -> Result<Self, Box<dyn Error>> {
+        let keymap = config.hotkeys.keymap()?;
         let audio = audio::decode_to_memory(path)?;
 
         let spectrogram = if config.spectrograph.generate {
@@ -39,9 +43,8 @@ impl App {
                 config.spectrograph.overlap,
                 config.spectrograph.magnitude,
                 |done, total| {
-                    if total > 0 {
-                        eprint!("\rAnalyzing spectrogram... {:>3}%", done * 100 / total);
-                    }
+                    let pct = done * 100 / total.max(1);
+                    eprint!("\rAnalyzing spectrogram... {pct:>3}%");
                 },
             );
             eprintln!("\rAnalyzing spectrogram... done   ");
@@ -65,6 +68,7 @@ impl App {
             spectrogram,
             zoom,
             vertical_scale,
+            keymap,
             should_quit: false,
         })
     }
@@ -89,56 +93,39 @@ impl App {
         if key.kind == KeyEventKind::Release {
             return;
         }
-        let m = key.modifiers;
-        let shift = m.contains(KeyModifiers::SHIFT);
-        let alt = m.contains(KeyModifiers::ALT);
+        let entry = hotkeys::normalize(key.code, key.modifiers);
+        let Some(&action) = self.keymap.get(&entry) else {
+            return;
+        };
+        self.dispatch(action);
+    }
+
+    fn dispatch(&mut self, action: Action) {
         let total = self.audio.duration;
+        match action {
+            Action::PlayPause => self.engine.toggle_pause(),
+            Action::Stop => self.engine.stop(),
+            Action::Mute => self.engine.toggle_mute(),
+            Action::Quit => self.should_quit = true,
 
-        match key.code {
-            KeyCode::Char(' ') => self.engine.toggle_pause(),
-            KeyCode::Char('s') => self.engine.stop(),
-            KeyCode::Char('m') => self.engine.toggle_mute(),
-            KeyCode::Char('q') | KeyCode::Esc => self.should_quit = true,
+            Action::SeekBack => self.engine.seek_relative(-self.config.seek.normal, total),
+            Action::SeekForward => self.engine.seek_relative(self.config.seek.normal, total),
+            Action::SeekBackLarge => self.engine.seek_relative(-self.config.seek.large, total),
+            Action::SeekForwardLarge => self.engine.seek_relative(self.config.seek.large, total),
+            Action::SeekBackFine => self.engine.seek_relative(-self.config.seek.fine, total),
+            Action::SeekForwardFine => self.engine.seek_relative(self.config.seek.fine, total),
 
-            KeyCode::Left | KeyCode::Right => {
-                let sign = if matches!(key.code, KeyCode::Left) {
-                    -1.0
-                } else {
-                    1.0
-                };
-                let step = if shift {
-                    self.config.seek.large
-                } else if alt {
-                    self.config.seek.fine
-                } else {
-                    self.config.seek.normal
-                };
-                self.engine.seek_relative(sign * step, total);
+            Action::WaveformZoomIn => self.zoom = (self.zoom * ZOOM_FACTOR).min(1024.0),
+            Action::WaveformZoomOut => self.zoom = (self.zoom / ZOOM_FACTOR).max(1.0),
+            Action::VscaleIncrease => {
+                self.vertical_scale = (self.vertical_scale * ZOOM_FACTOR).min(100.0)
+            }
+            Action::VscaleDecrease => {
+                self.vertical_scale = (self.vertical_scale / ZOOM_FACTOR).max(0.1)
             }
 
-            KeyCode::Up | KeyCode::Down => {
-                let up = matches!(key.code, KeyCode::Up);
-                if shift {
-                    // Waveform zoom.
-                    self.zoom = if up {
-                        (self.zoom * ZOOM_FACTOR).min(1024.0)
-                    } else {
-                        (self.zoom / ZOOM_FACTOR).max(1.0)
-                    };
-                } else if alt {
-                    // Waveform vertical scale.
-                    self.vertical_scale = if up {
-                        (self.vertical_scale * ZOOM_FACTOR).min(100.0)
-                    } else {
-                        (self.vertical_scale / ZOOM_FACTOR).max(0.1)
-                    };
-                } else {
-                    // Volume.
-                    self.engine
-                        .adjust_volume(if up { VOLUME_STEP } else { -VOLUME_STEP });
-                }
-            }
-            _ => {}
+            Action::VolumeUp => self.engine.adjust_volume(VOLUME_STEP),
+            Action::VolumeDown => self.engine.adjust_volume(-VOLUME_STEP),
         }
     }
 
@@ -147,11 +134,10 @@ impl App {
         while !self.should_quit {
             terminal.draw(|frame| ui::render(frame, self))?;
 
-            if event::poll(TICK)? {
-                if let Event::Key(key) = event::read()? {
+            if event::poll(TICK)?
+                && let Event::Key(key) = event::read()? {
                     self.handle_key(key);
                 }
-            }
         }
         Ok(())
     }
