@@ -4,3 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+crossterm = "0.29.0"
+ratatui = "0.30.2"
+realfft = "3.5.0"
+rodio = "0.22.2"
+rustfft = "6.4.1"
