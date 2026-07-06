@@ -6,14 +6,22 @@
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
+use ratatui::symbols::Marker;
 use ratatui::text::{Line, Span};
+use ratatui::widgets::canvas::{Canvas, Line as CanvasLine, Points};
 use ratatui::widgets::{Block, Borders, Gauge, Paragraph};
 use ratatui::Frame;
 
 use crate::app::App;
+use crate::config::MarkerMode;
 use crate::dsp::{self};
 
 const PLAYHEAD: Color = Color::Indexed(226); // bright yellow
+const WAVE_COLOR: Color = Color::Indexed(37);
+
+/// 256-color heat ramp stops (inferno-ish): dark → purple → red → orange →
+/// yellow → white.
+const HEAT_STOPS: [u8; 8] = [17, 54, 91, 160, 196, 202, 214, 231];
 
 pub fn render(frame: &mut Frame, app: &App) {
     let area = frame.area();
@@ -117,6 +125,15 @@ fn draw_progress(frame: &mut Frame, area: Rect, app: &App) {
 }
 
 fn draw_waveform(frame: &mut Frame, area: Rect, app: &App) {
+    match app.config.waveform.marker {
+        MarkerMode::Block => draw_waveform_block(frame, area, app),
+        MarkerMode::Dot => draw_waveform_canvas(frame, area, app, Marker::Dot),
+        MarkerMode::Braille => draw_waveform_canvas(frame, area, app, Marker::Braille),
+    }
+}
+
+/// Default renderer: filled amplitude bars drawn straight into the cell buffer.
+fn draw_waveform_block(frame: &mut Frame, area: Rect, app: &App) {
     let block = Block::default().borders(Borders::ALL).title(" waveform ");
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -131,7 +148,6 @@ fn draw_waveform(frame: &mut Frame, area: Rect, app: &App) {
     let mid = inner.y + inner.height / 2;
     let half = (inner.height / 2).max(1) as f32;
     let buf = frame.buffer_mut();
-    let wave_color = Color::Indexed(37);
 
     for (i, (lo, hi)) in peaks.iter().enumerate() {
         let x = inner.x + i as u16;
@@ -140,7 +156,7 @@ fn draw_waveform(frame: &mut Frame, area: Rect, app: &App) {
         for dy in 0..=h {
             for y in [mid.saturating_sub(dy), (mid + dy).min(inner.bottom() - 1)] {
                 if let Some(cell) = buf.cell_mut((x, y)) {
-                    cell.set_symbol("█").set_style(Style::default().fg(wave_color));
+                    cell.set_symbol("█").set_style(Style::default().fg(WAVE_COLOR));
                 }
             }
         }
@@ -151,7 +167,87 @@ fn draw_waveform(frame: &mut Frame, area: Rect, app: &App) {
     draw_playhead(buf, inner, start, end, full_len, app);
 }
 
+/// Canvas renderer: min/max envelope as vertical segments at sub-cell
+/// resolution via `symbols::Marker` (Dot or Braille).
+fn draw_waveform_canvas(frame: &mut Frame, area: Rect, app: &App, marker: Marker) {
+    let inner_w = area.width.saturating_sub(2);
+    let inner_h = area.height.saturating_sub(2);
+    if inner_w == 0 || inner_h == 0 {
+        return;
+    }
+
+    let (start, end) = app.visible_range();
+    // Oversample horizontally so Braille's 2-per-cell resolution is used.
+    let res = inner_w as usize * marker_res(marker).0;
+    let peaks = dsp::waveform_peaks(&app.audio.mono, start, end, res);
+    let vscale = app.vertical_scale;
+
+    // Playhead x in canvas coordinates, if it falls in the visible window.
+    let full_len = app.audio.mono.len();
+    let total = app.audio.duration.as_secs_f32().max(0.001);
+    let pos = app.engine.position().as_secs_f32().min(total);
+    let idx = ((pos / total).clamp(0.0, 1.0) * full_len as f32) as usize;
+    let playhead_x = if end > start && idx >= start && idx < end {
+        Some((idx - start) as f64 * res as f64 / (end - start) as f64)
+    } else {
+        None
+    };
+
+    let canvas = Canvas::default()
+        .block(Block::default().borders(Borders::ALL).title(" waveform "))
+        .marker(marker)
+        .x_bounds([0.0, res.max(1) as f64])
+        .y_bounds([-1.0, 1.0])
+        .paint(move |ctx| {
+            for (i, (lo, hi)) in peaks.iter().enumerate() {
+                let x = i as f64;
+                let y1 = (lo * vscale).clamp(-1.0, 1.0) as f64;
+                let y2 = (hi * vscale).clamp(-1.0, 1.0) as f64;
+                ctx.draw(&CanvasLine {
+                    x1: x,
+                    y1,
+                    x2: x,
+                    y2,
+                    color: WAVE_COLOR,
+                });
+            }
+            if let Some(px) = playhead_x {
+                ctx.draw(&CanvasLine {
+                    x1: px,
+                    y1: -1.0,
+                    x2: px,
+                    y2: 1.0,
+                    color: PLAYHEAD,
+                });
+            }
+        });
+    frame.render_widget(canvas, area);
+}
+
 fn draw_spectrogram(frame: &mut Frame, area: Rect, app: &App) {
+    match app.config.spectrograph.marker {
+        MarkerMode::Block => draw_spectrogram_block(frame, area, app),
+        MarkerMode::Dot => draw_spectrogram_canvas(frame, area, app, Marker::Dot),
+        MarkerMode::Braille => draw_spectrogram_canvas(frame, area, app, Marker::Braille),
+    }
+}
+
+/// Map a display row (0 = top) to a frequency bin, honoring the log/linear axis.
+fn row_to_bin(cy: usize, height: usize, bins: usize, log_freq: bool) -> usize {
+    let frac_from_bottom = if height <= 1 {
+        0.0
+    } else {
+        (height - 1 - cy) as f32 / (height - 1) as f32
+    };
+    if log_freq {
+        ((bins as f32).powf(frac_from_bottom) - 1.0).clamp(0.0, (bins - 1) as f32) as usize
+    } else {
+        (frac_from_bottom * (bins - 1) as f32) as usize
+    }
+}
+
+/// Default renderer: one colored cell per (time, frequency) bucket.
+fn draw_spectrogram_block(frame: &mut Frame, area: Rect, app: &App) {
     let block = Block::default()
         .borders(Borders::ALL)
         .title(" spectrograph ");
@@ -175,26 +271,10 @@ fn draw_spectrogram(frame: &mut Frame, area: Rect, app: &App) {
     let buf = frame.buffer_mut();
 
     for cx in 0..w {
-        // Map column to a spectrogram frame.
-        let frame_idx = if w <= 1 {
-            0
-        } else {
-            cx * (n_frames - 1) / (w - 1)
-        };
+        let frame_idx = if w <= 1 { 0 } else { cx * (n_frames - 1) / (w - 1) };
         let column = &spec.frames[frame_idx];
         for cy in 0..h {
-            // Row 0 is the top (high frequency); map to a bin.
-            let frac_from_bottom = if h <= 1 {
-                0.0
-            } else {
-                (h - 1 - cy) as f32 / (h - 1) as f32
-            };
-            let bin = if log_freq {
-                ((bins as f32).powf(frac_from_bottom) - 1.0)
-                    .clamp(0.0, (bins - 1) as f32) as usize
-            } else {
-                (frac_from_bottom * (bins - 1) as f32) as usize
-            };
+            let bin = row_to_bin(cy, h, bins, log_freq);
             let v = column.get(bin).copied().unwrap_or(0.0);
             if v <= 0.02 {
                 continue; // leave transparent
@@ -210,6 +290,85 @@ fn draw_spectrogram(frame: &mut Frame, area: Rect, app: &App) {
 
     // Playhead: spectrogram indices span all frames.
     draw_playhead(buf, inner, 0, n_frames, n_frames, app);
+}
+
+/// Canvas renderer: sample the spectrogram at the marker's sub-cell resolution
+/// and plot points grouped by heat level. Note a Braille/Dot cell carries a
+/// single color, so within one cell the strongest level wins (drawn last),
+/// while the sub-dots add time/frequency detail.
+fn draw_spectrogram_canvas(frame: &mut Frame, area: Rect, app: &App, marker: Marker) {
+    let inner_w = area.width.saturating_sub(2) as usize;
+    let inner_h = area.height.saturating_sub(2) as usize;
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" spectrograph ");
+    if inner_w == 0 || inner_h == 0 {
+        frame.render_widget(block, area);
+        return;
+    }
+    let Some(spec) = &app.spectrogram else {
+        frame.render_widget(block, area);
+        return;
+    };
+    if spec.frames.is_empty() {
+        frame.render_widget(block, area);
+        return;
+    }
+
+    let n_frames = spec.frames.len();
+    let bins = spec.bins.max(1);
+    let log_freq = app.config.spectrograph.log_frequency();
+    let (rx, ry) = marker_res(marker);
+    let sw = inner_w * rx;
+    let sh = inner_h * ry;
+
+    // Bucket sub-cell points by heat level so each level draws in its color.
+    let mut buckets: Vec<Vec<(f64, f64)>> = vec![Vec::new(); HEAT_STOPS.len()];
+    for sx in 0..sw {
+        let frame_idx = if sw <= 1 { 0 } else { sx * (n_frames - 1) / (sw - 1) };
+        let column = &spec.frames[frame_idx];
+        for sy in 0..sh {
+            // sy = 0 is the bottom (low frequency); reuse the row mapping with
+            // an inverted index since row_to_bin expects 0 = top.
+            let bin = row_to_bin(sh - 1 - sy, sh, bins, log_freq);
+            let v = column.get(bin).copied().unwrap_or(0.0);
+            if v <= 0.02 {
+                continue;
+            }
+            buckets[heat_level(v)].push((sx as f64, sy as f64));
+        }
+    }
+
+    // Playhead x in sub-cell coordinates.
+    let total = app.audio.duration.as_secs_f32().max(0.001);
+    let pos = app.engine.position().as_secs_f32().min(total);
+    let playhead_x = (pos / total).clamp(0.0, 1.0) as f64 * sw as f64;
+
+    let canvas = Canvas::default()
+        .block(block)
+        .marker(marker)
+        .x_bounds([0.0, sw.max(1) as f64])
+        .y_bounds([0.0, sh.max(1) as f64])
+        .paint(move |ctx| {
+            // Draw low levels first so the strongest color wins each cell.
+            for (level, coords) in buckets.iter().enumerate() {
+                if coords.is_empty() {
+                    continue;
+                }
+                ctx.draw(&Points {
+                    coords,
+                    color: Color::Indexed(HEAT_STOPS[level]),
+                });
+            }
+            ctx.draw(&CanvasLine {
+                x1: playhead_x,
+                y1: 0.0,
+                x2: playhead_x,
+                y2: sh as f64,
+                color: PLAYHEAD,
+            });
+        });
+    frame.render_widget(canvas, area);
 }
 
 /// Draw a vertical playhead marker mapped from playback position onto a pane
@@ -252,14 +411,24 @@ fn draw_footer(frame: &mut Frame, area: Rect) {
     );
 }
 
+/// Quantize an intensity 0.0–1.0 to an index into [`HEAT_STOPS`].
+fn heat_level(v: f32) -> usize {
+    let i = (v.clamp(0.0, 1.0) * (HEAT_STOPS.len() - 1) as f32).round() as usize;
+    i.min(HEAT_STOPS.len() - 1)
+}
+
 /// Map an intensity 0.0–1.0 to a 256-color heat ramp (inferno-ish).
 fn heat_color(v: f32) -> Color {
-    // A handful of stops through the 256-color cube: dark → purple → red →
-    // orange → yellow → white.
-    const STOPS: [u8; 8] = [17, 54, 91, 160, 196, 202, 214, 231];
-    let v = v.clamp(0.0, 1.0);
-    let i = (v * (STOPS.len() - 1) as f32).round() as usize;
-    Color::Indexed(STOPS[i.min(STOPS.len() - 1)])
+    Color::Indexed(HEAT_STOPS[heat_level(v)])
+}
+
+/// Sub-cell resolution (x, y) a marker provides on a Canvas.
+fn marker_res(marker: Marker) -> (usize, usize) {
+    match marker {
+        Marker::Braille => (2, 4),
+        Marker::HalfBlock => (1, 2),
+        _ => (1, 1), // Dot, Block, Bar
+    }
 }
 
 fn fmt_duration(secs: f32) -> String {

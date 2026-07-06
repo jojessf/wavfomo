@@ -36,6 +36,17 @@ pub enum FreqScale {
     Linear,
 }
 
+/// How a visualizer pane is drawn. `Block` is the built-in cell renderer;
+/// `Dot`/`Braille` use ratatui's `Canvas` (`symbols::Marker`) for sub-cell
+/// resolution.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MarkerMode {
+    Block,
+    Dot,
+    Braille,
+}
+
 /// Horizontal zoom for the waveform: `"fit"` or a numeric factor.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Zoom {
@@ -113,6 +124,7 @@ pub struct WaveformConfig {
     pub channels: ChannelMode,
     pub zoom: Zoom,
     pub vertical_scale: f32,
+    pub marker: MarkerMode,
     pub color_preset: String,
 }
 
@@ -124,6 +136,7 @@ impl Default for WaveformConfig {
             channels: ChannelMode::Mono,
             zoom: Zoom::Fit,
             vertical_scale: 1.0,
+            marker: MarkerMode::Block,
             color_preset: "aurora".into(),
         }
     }
@@ -140,6 +153,7 @@ pub struct SpectrographConfig {
     pub overlap: f32,
     pub magnitude: Magnitude,
     pub scale: FreqScale,
+    pub marker: MarkerMode,
     pub color_preset: String,
 }
 
@@ -154,6 +168,7 @@ impl Default for SpectrographConfig {
             overlap: 0.5,
             magnitude: Magnitude::Db,
             scale: FreqScale::Log,
+            marker: MarkerMode::Block,
             color_preset: "inferno".into(),
         }
     }
