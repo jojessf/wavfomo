@@ -331,3 +331,14 @@ pushes them.
 ## License
 
 Copyright © 2026 Jojess Fournier.
+
+wavfomo is built on open-source Rust crates. Their licenses (all permissive or
+weak-copyleft — MIT, Apache-2.0, BSD, MPL-2.0, etc.) and required copyright
+notices are reproduced in [`THIRD-PARTY-LICENSES.html`](THIRD-PARTY-LICENSES.html),
+generated from the full dependency tree with [`cargo-about`](https://github.com/EmbarkStudios/cargo-about).
+Regenerate it after changing dependencies with `make licenses`.
+
+The accepted set of licenses is enforced by [`cargo-deny`](https://github.com/EmbarkStudios/cargo-deny)
+(`make deny`, and automatically in CI via `.forgejo/workflows/licenses.yml`): a
+dependency introducing a disallowed (e.g. strong-copyleft) license fails the
+check. Its `deny.toml` allow-list is kept in sync with `about.toml`.

@@ -2,6 +2,13 @@
 name = "wavfomo"
 version = "0.1.1"
 edition = "2024"
+# Proprietary; see the README license section. The SPDX `LicenseRef-` form marks
+# this as a non-OSI license so cargo-about / cargo-deny don't flag the root crate
+# as "unknown" while auditing the dependency tree.
+license = "LicenseRef-proprietary"
+# Proprietary app — never publish to crates.io. Also lets cargo-about/-deny skip
+# this crate when auditing third-party licenses (see `private` in about.toml).
+publish = false
 
 [dependencies]
 clap = { version = "4.6.1", features = ["derive"] }
