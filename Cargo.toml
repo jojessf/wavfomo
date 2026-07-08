@@ -12,3 +12,8 @@ rodio = "0.22.2"
 rustfft = "6.4.1"
 serde = { version = "1.0.228", features = ["derive"] }
 toml = "1.1.2"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1

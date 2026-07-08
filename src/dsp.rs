@@ -1,5 +1,9 @@
 //! Precomputed visualizer data: waveform peaks and a full-track spectrogram.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::thread;
+use std::time::Duration;
+
 use realfft::RealFftPlanner;
 
 use crate::config::Magnitude;
@@ -36,10 +40,9 @@ pub fn compute_spectrogram(
         })
         .collect();
 
+    // The plan is `Send + Sync`; workers share it and keep their own scratch.
     let mut planner = RealFftPlanner::<f32>::new();
     let fft = planner.plan_fft_forward(fft_size);
-    let mut input = fft.make_input_vec();
-    let mut output = fft.make_output_vec();
 
     let n_frames = if mono.len() < fft_size {
         1
@@ -51,37 +54,68 @@ pub fn compute_spectrogram(
     const DB_FLOOR: f32 = -80.0;
     let norm = 2.0 / fft_size as f32;
 
-    let mut frames = Vec::with_capacity(n_frames);
-    for f in 0..n_frames {
-        let start = f * hop;
-        for i in 0..fft_size {
-            let s = mono.get(start + i).copied().unwrap_or(0.0);
-            input[i] = s * window[i];
-        }
-        // realfft requires the input length to match; process in place.
-        if fft.process(&mut input, &mut output).is_err() {
-            break;
-        }
+    // One column per frame. Each FFT is independent, so we split the frames
+    // across worker threads that fill disjoint slices in parallel.
+    let mut frames: Vec<Vec<f32>> = vec![Vec::new(); n_frames];
 
-        let mut column = Vec::with_capacity(bins);
-        for c in &output {
-            let mag = (c.norm()) * norm;
-            let value = match magnitude {
-                Magnitude::Db => {
-                    let db = 20.0 * (mag + 1e-9).log10();
-                    ((db - DB_FLOOR) / -DB_FLOOR).clamp(0.0, 1.0)
+    let threads = thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1)
+        .min(n_frames.max(1));
+    let chunk = n_frames.div_ceil(threads.max(1)).max(1);
+    let done = AtomicUsize::new(0);
+
+    // Copyable references the worker closures capture by value.
+    let window: &[f32] = &window;
+    let fft = &fft;
+    let done = &done;
+
+    thread::scope(|scope| {
+        for (ci, slice) in frames.chunks_mut(chunk).enumerate() {
+            let base = ci * chunk;
+            scope.spawn(move || {
+                let mut input = fft.make_input_vec();
+                let mut output = fft.make_output_vec();
+                let mut scratch = fft.make_scratch_vec();
+                for (local, out) in slice.iter_mut().enumerate() {
+                    let start = (base + local) * hop;
+                    for i in 0..fft_size {
+                        input[i] = mono.get(start + i).copied().unwrap_or(0.0) * window[i];
+                    }
+                    if fft
+                        .process_with_scratch(&mut input, &mut output, &mut scratch)
+                        .is_err()
+                    {
+                        break;
+                    }
+                    let mut column = Vec::with_capacity(bins);
+                    for c in &output {
+                        let mag = c.norm() * norm;
+                        let value = match magnitude {
+                            Magnitude::Db => {
+                                let db = 20.0 * (mag + 1e-9).log10();
+                                ((db - DB_FLOOR) / -DB_FLOOR).clamp(0.0, 1.0)
+                            }
+                            Magnitude::Linear => mag.clamp(0.0, 1.0),
+                        };
+                        column.push(value);
+                    }
+                    *out = column;
+                    done.fetch_add(1, Ordering::Relaxed);
                 }
-                Magnitude::Linear => mag.clamp(0.0, 1.0),
-            };
-            column.push(value);
+            });
         }
-        frames.push(column);
 
-        if f % 32 == 0 {
-            progress(f, n_frames);
+        // Drive the progress bar from the main thread while workers run.
+        loop {
+            let d = done.load(Ordering::Relaxed);
+            progress(d, n_frames);
+            if d >= n_frames {
+                break;
+            }
+            thread::sleep(Duration::from_millis(4));
         }
-    }
-    progress(n_frames, n_frames);
+    });
 
     Spectrogram { frames, bins }
 }

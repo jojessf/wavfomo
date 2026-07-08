@@ -4,4 +4,5 @@ bak/*
 *.mp3
 /target
 wavfomo
+wavfomo.debug
 howtorust.md
