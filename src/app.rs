@@ -33,7 +33,23 @@ impl App {
     /// Decode the file, precompute visualizer data, and open the audio device.
     pub fn load(config: Config, path: &Path) -> Result<Self, Box<dyn Error>> {
         let keymap = config.hotkeys.keymap()?;
-        let audio = audio::decode_to_memory(path)?;
+
+        // Decoding the whole file into memory can take a while with no visible
+        // sign of progress, so report it before the spectrogram pass runs.
+        eprint!("Decoding audio... ");
+        const SPINNER: [char; 4] = ['|', '/', '-', '\\'];
+        let mut ticks = 0usize;
+        let audio = audio::decode_to_memory(path, |frac| {
+            match frac {
+                Some(f) => eprint!("\rDecoding audio... {:>3}%", (f * 100.0) as u32),
+                // Length unknown (MP3/Ogg): fall back to a spinner.
+                None => {
+                    eprint!("\rDecoding audio... {}", SPINNER[ticks % SPINNER.len()]);
+                    ticks += 1;
+                }
+            }
+        })?;
+        eprintln!("\rDecoding audio... done   ");
 
         let spectrogram = if config.spectrograph.generate {
             eprint!("Analyzing spectrogram... ");
