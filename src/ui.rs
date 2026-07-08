@@ -70,7 +70,9 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_else(|| "?".into());
 
-    let state = if app.engine.is_paused() {
+    let state = if app.engine.finished() {
+        "✓ done uwu"
+    } else if app.engine.is_paused() {
         "⏸ paused"
     } else {
         "▶ playing"
@@ -420,7 +422,7 @@ fn draw_playhead(
 }
 
 fn draw_footer(frame: &mut Frame, area: Rect) {
-    let hint = "Space play/pause  ·  s stop  ·  ←→ seek (Shift ±10s, Alt ±0.1s)  ·  ↑↓ vol  ·  Ctrl+PgUp/PgDn zoom  ·  Alt+↑↓ vscale  ·  m mute  ·  q quit";
+    let hint = "Space play/pause  ·  s stop  ·  ←→ seek (Shift ±10s, Alt ±0.1s)  ·  Home/End start/end  ·  ↑↓ vol  ·  Ctrl+PgUp/PgDn zoom  ·  Alt+↑↓ vscale  ·  m mute  ·  q quit";
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
             hint,
