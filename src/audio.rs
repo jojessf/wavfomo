@@ -45,12 +45,29 @@ impl AudioError {
 }
 
 /// Decode the entire file into a mono buffer for analysis.
-pub fn decode_to_memory(path: &Path) -> Result<AudioData, AudioError> {
+///
+/// `progress(fraction)` is called periodically during the decode. `fraction` is
+/// `Some(0.0..=1.0)` when the total duration is known (WAV, FLAC), or `None` for
+/// formats that don't report a length up front (MP3, Ogg Vorbis) — in which case
+/// the caller can only show an indeterminate spinner.
+pub fn decode_to_memory(
+    path: &Path,
+    mut progress: impl FnMut(Option<f32>),
+) -> Result<AudioData, AudioError> {
     let file = File::open(path).map_err(|e| {
         AudioError::new(format!("cannot open '{}': {}", path.display(), e))
     })?;
 
-    let decoder = Decoder::try_from(file).map_err(|e| {
+    // Passing the byte length lets the decoder report a total duration for
+    // formats that otherwise can't (MP3, Ogg Vorbis), so decode progress can
+    // show a real percentage instead of an indeterminate spinner.
+    let byte_len = file.metadata().ok().map(|m| m.len());
+
+    let mut builder = Decoder::builder().with_data(file);
+    if let Some(len) = byte_len {
+        builder = builder.with_byte_len(len);
+    }
+    let decoder = builder.build().map_err(|e| {
         AudioError::new(format!(
             "cannot decode '{}': {e}. Unsupported or unrecognized format \
              (supported: WAV, FLAC, Ogg Vorbis, MP3) — this format would need \
@@ -61,17 +78,43 @@ pub fn decode_to_memory(path: &Path) -> Result<AudioData, AudioError> {
 
     let channels = decoder.channels().get();
     let sample_rate = decoder.sample_rate().get();
-
-    // Collect interleaved samples, then downmix to mono.
-    let interleaved: Vec<f32> = decoder.collect();
     let ch = channels.max(1) as usize;
-    let frames = interleaved.len() / ch;
-    let mut mono = Vec::with_capacity(frames);
-    for frame in interleaved.chunks_exact(ch) {
-        let sum: f32 = frame.iter().copied().sum();
-        mono.push(sum / ch as f32);
-    }
 
+    // Total length when the format reports it, so we can show real progress and
+    // preallocate. `None` for MP3/Vorbis without a byte-length hint.
+    let total = decoder.total_duration();
+    let total_secs = total.map(|d| d.as_secs_f64()).filter(|s| *s > 0.0);
+    let est_frames = total_secs
+        .map(|s| (s * sample_rate as f64) as usize)
+        .unwrap_or(0);
+    let mut mono = Vec::with_capacity(est_frames);
+
+    // Downmix to mono on the fly instead of buffering the interleaved signal.
+    // Report progress roughly every ~1.5s of decoded audio.
+    let report_every = (sample_rate as usize).saturating_mul(3) / 2;
+    let report_every = report_every.max(1);
+    let mut next_report = report_every;
+    let mut sum = 0.0f32;
+    let mut in_frame = 0usize;
+    for s in decoder {
+        sum += s;
+        in_frame += 1;
+        if in_frame == ch {
+            mono.push(sum / ch as f32);
+            sum = 0.0;
+            in_frame = 0;
+            if mono.len() >= next_report {
+                next_report = mono.len() + report_every;
+                let frac = total_secs.map(|secs| {
+                    (mono.len() as f64 / sample_rate as f64 / secs).clamp(0.0, 1.0) as f32
+                });
+                progress(frac);
+            }
+        }
+    }
+    progress(Some(1.0));
+
+    let frames = mono.len();
     let duration = if sample_rate > 0 {
         Duration::from_secs_f64(frames as f64 / sample_rate as f64)
     } else {
