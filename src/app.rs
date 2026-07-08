@@ -144,6 +144,8 @@ impl App {
             Action::SeekForwardLarge => self.engine.seek_relative(self.config.seek.large, total),
             Action::SeekBackFine => self.engine.seek_relative(-self.config.seek.fine, total),
             Action::SeekForwardFine => self.engine.seek_relative(self.config.seek.fine, total),
+            Action::SeekStart => self.engine.seek_to_start(),
+            Action::SeekEnd => self.engine.seek_to_end(total),
 
             Action::WaveformZoomIn => self.zoom = (self.zoom * ZOOM_FACTOR).min(1024.0),
             Action::WaveformZoomOut => self.zoom = (self.zoom / ZOOM_FACTOR).max(1.0),
