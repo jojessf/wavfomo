@@ -131,6 +131,14 @@ impl App {
         (start, (start + span).min(len))
     }
 
+    /// The visible time window `[start, end)` in seconds, matching the
+    /// waveform's zoom/seek window (whole track when zoomed out).
+    pub fn visible_time_range(&self) -> (f32, f32) {
+        let (s, e) = self.visible_range();
+        let sr = self.audio.sample_rate.max(1) as f32;
+        (s as f32 / sr, e as f32 / sr)
+    }
+
     /// The visible spectrogram frame range `[start, end)`, mapped from the
     /// waveform's visible sample window so both panes zoom and seek together.
     pub fn visible_frame_range(&self, n_frames: usize) -> (usize, usize) {

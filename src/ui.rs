@@ -51,15 +51,80 @@ pub fn render(frame: &mut Frame, app: &App) {
     idx += 1;
     draw_progress(frame, chunks[idx], app);
     idx += 1;
+    let mut wave_area = None;
+    let mut spec_area = None;
     if show_wave {
-        draw_waveform(frame, chunks[idx], app);
+        let a = chunks[idx];
+        draw_waveform(frame, a, app);
+        wave_area = Some(a);
         idx += 1;
     }
     if show_spec {
-        draw_spectrogram(frame, chunks[idx], app);
+        let a = chunks[idx];
+        draw_spectrogram(frame, a, app);
+        spec_area = Some(a);
         idx += 1;
     }
     draw_footer(frame, chunks[idx], app);
+
+    // Overlay a time axis on the border between the panes. When both are shown
+    // it lands on the waveform's bottom border (the divider between them);
+    // otherwise it annotates whichever single pane is visible.
+    if let Some(a) = wave_area {
+        draw_time_axis(frame, a.x + 1, a.width.saturating_sub(2), a.bottom().saturating_sub(1), app);
+    } else if let Some(a) = spec_area {
+        draw_time_axis(frame, a.x + 1, a.width.saturating_sub(2), a.y, app);
+    }
+}
+
+/// Draw evenly spaced `m:ss` labels across a border row, spanning the currently
+/// visible time window. Always includes a flush-left and flush-right label, and
+/// keeps at least `MIN_GAP` blank cells between adjacent labels; the number of
+/// labels scales with the available width.
+fn draw_time_axis(frame: &mut Frame, x0: u16, width: u16, y: u16, app: &App) {
+    const MIN_GAP: usize = 6;
+    let w = width as usize;
+    if w < 4 {
+        return;
+    }
+    let (t0, t1) = app.visible_time_range();
+
+    // The widest label (largest time) sets the layout box width.
+    let label_w = fmt_duration(t1).len().max(4);
+
+    // Most labels that fit as N boxes of `label_w` with >= MIN_GAP between them:
+    // N*label_w + (N-1)*MIN_GAP <= w  ⇒  N <= (w + MIN_GAP) / (label_w + MIN_GAP).
+    let mut n = (w + MIN_GAP) / (label_w + MIN_GAP);
+    if n < 2 {
+        // Too tight for spacing; still show both ends if they don't overlap.
+        n = if 2 * label_w <= w { 2 } else { 1 };
+    }
+
+    let style = Style::default().fg(Color::Indexed(250));
+    let buf = frame.buffer_mut();
+
+    // Box left edges run flush-left (0) to flush-right (w - label_w), evenly.
+    let span = w.saturating_sub(label_w);
+    for i in 0..n {
+        let f = if n <= 1 { 0.0 } else { i as f32 / (n - 1) as f32 };
+        let label = fmt_duration(t0 + f * (t1 - t0));
+        let len = label.len();
+        let start = if i == 0 {
+            0
+        } else if i == n - 1 {
+            w.saturating_sub(len)
+        } else {
+            // Center the label within its evenly placed box.
+            let box_left = ((i * span) as f32 / (n - 1) as f32).round() as usize;
+            box_left + label_w.saturating_sub(len) / 2
+        };
+        for (j, ch) in label.char_indices() {
+            let x = x0 + (start + j) as u16;
+            if let Some(cell) = buf.cell_mut((x, y)) {
+                cell.set_symbol(&ch.to_string()).set_style(style);
+            }
+        }
+    }
 }
 
 fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
