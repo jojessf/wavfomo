@@ -19,6 +19,8 @@ pub enum Action {
     SeekForwardLarge,
     SeekBackFine,
     SeekForwardFine,
+    SeekStart,
+    SeekEnd,
     WaveformZoomIn,
     WaveformZoomOut,
     VscaleIncrease,
