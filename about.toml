@@ -1,0 +1,36 @@
+# cargo-about configuration. Controls how THIRD-PARTY-LICENSES.html is built
+# from the resolved dependency tree.
+#
+# Regenerate with:  cargo about generate about.hbs > THIRD-PARTY-LICENSES.html
+
+# Skip this crate itself: it's `publish = false` (private), not a third party,
+# so it doesn't belong in its own attribution file.
+private = { ignore = true }
+
+# Only gather licenses for what actually ships in the binary: build- and
+# dev-dependencies don't get distributed, so their licenses impose no
+# attribution obligation on the released artifact.
+ignore-build-dependencies = true
+ignore-dev-dependencies = true
+
+# The set of licenses we expect across the tree. `cargo about` errors on any
+# crate whose license isn't listed here, so this doubles as a policy gate: a new
+# dependency under an unexpected (e.g. copyleft) license fails the generate step
+# instead of silently shipping. All entries below are permissive / weak-copyleft.
+accepted = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "MPL-2.0",          # symphonia (pulled in by rodio); weak, file-level copyleft
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "BSL-1.0",
+    "CC0-1.0",
+    "Unlicense",
+    "0BSD",
+    "LicenseRef-proprietary",  # this crate itself
+]

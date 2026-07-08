@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>wavfomo — Third-Party Licenses</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 60rem; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }
+      h1 { border-bottom: 1px solid #ccc; padding-bottom: .3rem; }
+      .license-used-by { columns: 2; font-size: .9rem; }
+      .license-text { white-space: pre-wrap; background: #f6f6f6; padding: 1rem; border-radius: 6px; font-size: .8rem; overflow-x: auto; }
+      .license { border-top: 1px solid #eee; padding-top: 1rem; margin-top: 1.5rem; }
+      @media (prefers-color-scheme: dark) {
+        body { background: #111; color: #ddd; }
+        .license-text { background: #1c1c1c; }
+        a { color: #6cf; }
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Third-Party Licenses</h1>
+    <p>
+      wavfomo bundles the following open-source dependencies. Their license
+      texts are reproduced below in fulfillment of attribution requirements.
+    </p>
+
+    <h2>Overview</h2>
+    <ul class="licenses-overview">
+      {{#each overview}}
+      <li><a href="#{{id}}">{{name}}</a> — {{count}} crate(s)</li>
+      {{/each}}
+    </ul>
+
+    <h2>License texts</h2>
+    {{#each licenses}}
+    <div class="license">
+      <h3 id="{{id}}">{{name}}</h3>
+      <h4>Used by</h4>
+      <ul class="license-used-by">
+        {{#each used_by}}
+        <li>
+          <a href="{{#if crate.repository}}{{crate.repository}}{{else}}https://crates.io/crates/{{crate.name}}{{/if}}">
+            {{crate.name}} {{crate.version}}</a>
+        </li>
+        {{/each}}
+      </ul>
+      <pre class="license-text">{{license_text}}</pre>
+    </div>
+    {{/each}}
+  </body>
+</html>
