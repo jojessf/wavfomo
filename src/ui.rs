@@ -59,7 +59,7 @@ pub fn render(frame: &mut Frame, app: &App) {
         draw_spectrogram(frame, chunks[idx], app);
         idx += 1;
     }
-    draw_footer(frame, chunks[idx]);
+    draw_footer(frame, chunks[idx], app);
 }
 
 fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
@@ -421,8 +421,39 @@ fn draw_playhead(
     }
 }
 
-fn draw_footer(frame: &mut Frame, area: Rect) {
-    let hint = "Space play/pause  ·  s stop  ·  ←→ seek (Shift ±10s, Alt ±0.1s)  ·  Home/End start/end  ·  ↑↓ vol  ·  Ctrl+PgUp/PgDn zoom  ·  Alt+↑↓ vscale  ·  m mute  ·  q quit";
+fn draw_footer(frame: &mut Frame, area: Rect, app: &App) {
+    // When the goto prompt is open, the footer becomes the input line.
+    if let Some(goto) = &app.goto {
+        let line = if goto.error {
+            Line::from(vec![
+                Span::styled("goto ", Style::default().fg(Color::Indexed(203))),
+                Span::styled(
+                    format!("{}▌", goto.buffer),
+                    Style::default().fg(Color::Indexed(231)),
+                ),
+                Span::styled(
+                    "   invalid — use m:ss (e.g. 1:23)",
+                    Style::default().fg(Color::Indexed(203)),
+                ),
+            ])
+        } else {
+            Line::from(vec![
+                Span::styled("goto ", Style::default().fg(Color::Indexed(150))),
+                Span::styled(
+                    format!("{}▌", goto.buffer),
+                    Style::default().fg(Color::Indexed(231)),
+                ),
+                Span::styled(
+                    "   m:ss · Enter to jump · Esc to cancel",
+                    Style::default().fg(Color::Indexed(240)),
+                ),
+            ])
+        };
+        frame.render_widget(Paragraph::new(line), area);
+        return;
+    }
+
+    let hint = "Space play/pause  ·  s stop  ·  ←→ seek (Shift ±10s, Alt ±0.1s)  ·  Home/End start/end  ·  g goto  ·  ↑↓ vol  ·  Ctrl+PgUp/PgDn zoom  ·  Alt+↑↓ vscale  ·  m mute  ·  q quit";
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
             hint,

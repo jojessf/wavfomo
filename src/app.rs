@@ -5,7 +5,7 @@ use std::io;
 use std::path::Path;
 use std::time::Duration;
 
-use crossterm::event::{self, Event, KeyEvent, KeyEventKind};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 
 use crate::audio::{self, AudioData, Engine};
 use crate::config::{Config, Zoom};
@@ -25,8 +25,33 @@ pub struct App {
     /// Horizontal zoom factor, 1.0 == fit whole file.
     pub zoom: f32,
     pub vertical_scale: f32,
+    /// Active "goto timestamp" prompt, if the user is typing one.
+    pub goto: Option<GotoInput>,
     keymap: Keymap,
     should_quit: bool,
+}
+
+/// State for the inline "goto timestamp" text prompt (opened with `g`).
+pub struct GotoInput {
+    pub buffer: String,
+    /// Set when the last Enter failed validation, so the UI can flag it.
+    pub error: bool,
+}
+
+/// Parse an `m:ss` timestamp (e.g. `1:23`) into a duration. Requires one or
+/// more minute digits, a colon, then exactly two second digits — matching
+/// `^\d+:\d{2}$`. Returns `None` on any other shape.
+fn parse_timestamp(s: &str) -> Option<Duration> {
+    let (mins, secs) = s.split_once(':')?;
+    if mins.is_empty() || !mins.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    if secs.len() != 2 || !secs.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let mins: u64 = mins.parse().ok()?;
+    let secs: u64 = secs.parse().ok()?;
+    Some(Duration::from_secs(mins * 60 + secs))
 }
 
 impl App {
@@ -84,6 +109,7 @@ impl App {
             spectrogram,
             zoom,
             vertical_scale,
+            goto: None,
             keymap,
             should_quit: false,
         })
@@ -123,11 +149,47 @@ impl App {
         if key.kind == KeyEventKind::Release {
             return;
         }
+        // While the goto prompt is open, keystrokes edit its text instead of
+        // triggering hotkeys.
+        if self.goto.is_some() {
+            self.handle_goto_key(key);
+            return;
+        }
         let entry = hotkeys::normalize(key.code, key.modifiers);
         let Some(&action) = self.keymap.get(&entry) else {
             return;
         };
         self.dispatch(action);
+    }
+
+    /// Editing keys for the open goto prompt: type `m:ss`, Enter to jump, Esc to
+    /// cancel. Enter on an invalid string flags the error and keeps the prompt.
+    fn handle_goto_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc => self.goto = None,
+            KeyCode::Enter => {
+                let text = self.goto.as_ref().map(|g| g.buffer.clone()).unwrap_or_default();
+                if let Some(target) = parse_timestamp(&text) {
+                    self.engine.seek_to(target, self.audio.duration);
+                    self.goto = None;
+                } else if let Some(g) = self.goto.as_mut() {
+                    g.error = true;
+                }
+            }
+            KeyCode::Backspace => {
+                if let Some(g) = self.goto.as_mut() {
+                    g.buffer.pop();
+                    g.error = false;
+                }
+            }
+            KeyCode::Char(c) => {
+                if let Some(g) = self.goto.as_mut() {
+                    g.buffer.push(c);
+                    g.error = false;
+                }
+            }
+            _ => {}
+        }
     }
 
     fn dispatch(&mut self, action: Action) {
@@ -146,6 +208,12 @@ impl App {
             Action::SeekForwardFine => self.engine.seek_relative(self.config.seek.fine, total),
             Action::SeekStart => self.engine.seek_to_start(),
             Action::SeekEnd => self.engine.seek_to_end(total),
+            Action::Goto => {
+                self.goto = Some(GotoInput {
+                    buffer: String::new(),
+                    error: false,
+                })
+            }
 
             Action::WaveformZoomIn => self.zoom = (self.zoom * ZOOM_FACTOR).min(1024.0),
             Action::WaveformZoomOut => self.zoom = (self.zoom / ZOOM_FACTOR).max(1.0),

@@ -257,6 +257,17 @@ impl Engine {
         }
     }
 
+    /// Jump to an absolute position, clamped to `[0, total]`, preserving the
+    /// current play/pause state (re-queues paused if the track had finished).
+    pub fn seek_to(&self, target: Duration, total: Duration) {
+        let target = target.min(total);
+        if self.finished() {
+            self.requeue(target, false);
+        } else {
+            let _ = self.player.try_seek(target);
+        }
+    }
+
     pub fn volume_percent(&self) -> u8 {
         (self.volume * 100.0).round() as u8
     }
