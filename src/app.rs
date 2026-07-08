@@ -105,6 +105,20 @@ impl App {
         (start, (start + span).min(len))
     }
 
+    /// The visible spectrogram frame range `[start, end)`, mapped from the
+    /// waveform's visible sample window so both panes zoom and seek together.
+    pub fn visible_frame_range(&self, n_frames: usize) -> (usize, usize) {
+        let len = self.audio.mono.len();
+        if len == 0 || n_frames == 0 {
+            return (0, n_frames);
+        }
+        let (s, e) = self.visible_range();
+        let fstart = s * n_frames / len;
+        // Round the end up so the window never collapses below the sample span.
+        let fend = e.saturating_mul(n_frames).div_ceil(len).min(n_frames);
+        (fstart, fend.max(fstart + 1).min(n_frames))
+    }
+
     fn handle_key(&mut self, key: KeyEvent) {
         if key.kind == KeyEventKind::Release {
             return;

@@ -268,10 +268,16 @@ fn draw_spectrogram_block(frame: &mut Frame, area: Rect, app: &App) {
     let w = inner.width as usize;
     let h = inner.height as usize;
     let log_freq = app.config.spectrograph.log_frequency();
+    let (fstart, fend) = app.visible_frame_range(n_frames);
+    let span = fend - fstart;
     let buf = frame.buffer_mut();
 
     for cx in 0..w {
-        let frame_idx = if w <= 1 { 0 } else { cx * (n_frames - 1) / (w - 1) };
+        let frame_idx = if w <= 1 || span <= 1 {
+            fstart
+        } else {
+            fstart + cx * (span - 1) / (w - 1)
+        };
         let column = &spec.frames[frame_idx];
         for cy in 0..h {
             let bin = row_to_bin(cy, h, bins, log_freq);
@@ -288,8 +294,8 @@ fn draw_spectrogram_block(frame: &mut Frame, area: Rect, app: &App) {
         }
     }
 
-    // Playhead: spectrogram indices span all frames.
-    draw_playhead(buf, inner, 0, n_frames, n_frames, app);
+    // Playhead: mapped onto the visible frame window.
+    draw_playhead(buf, inner, fstart, fend, n_frames, app);
 }
 
 /// Canvas renderer: sample the spectrogram at the marker's sub-cell resolution
@@ -321,11 +327,17 @@ fn draw_spectrogram_canvas(frame: &mut Frame, area: Rect, app: &App, marker: Mar
     let (rx, ry) = marker_res(marker);
     let sw = inner_w * rx;
     let sh = inner_h * ry;
+    let (fstart, fend) = app.visible_frame_range(n_frames);
+    let span = fend - fstart;
 
     // Bucket sub-cell points by heat level so each level draws in its color.
     let mut buckets: Vec<Vec<(f64, f64)>> = vec![Vec::new(); HEAT_STOPS.len()];
     for sx in 0..sw {
-        let frame_idx = if sw <= 1 { 0 } else { sx * (n_frames - 1) / (sw - 1) };
+        let frame_idx = if sw <= 1 || span <= 1 {
+            fstart
+        } else {
+            fstart + sx * (span - 1) / (sw - 1)
+        };
         let column = &spec.frames[frame_idx];
         for sy in 0..sh {
             // sy = 0 is the bottom (low frequency); reuse the row mapping with
@@ -339,10 +351,15 @@ fn draw_spectrogram_canvas(frame: &mut Frame, area: Rect, app: &App, marker: Mar
         }
     }
 
-    // Playhead x in sub-cell coordinates.
+    // Playhead x in sub-cell coordinates, mapped onto the visible window.
     let total = app.audio.duration.as_secs_f32().max(0.001);
     let pos = app.engine.position().as_secs_f32().min(total);
-    let playhead_x = (pos / total).clamp(0.0, 1.0) as f64 * sw as f64;
+    let ph_frame = (pos / total).clamp(0.0, 1.0) * n_frames as f32;
+    let playhead_x = if ph_frame >= fstart as f32 && ph_frame < fend as f32 {
+        Some((ph_frame - fstart as f32) as f64 / span as f64 * sw as f64)
+    } else {
+        None
+    };
 
     let canvas = Canvas::default()
         .block(block)
@@ -360,13 +377,15 @@ fn draw_spectrogram_canvas(frame: &mut Frame, area: Rect, app: &App, marker: Mar
                     color: Color::Indexed(HEAT_STOPS[level]),
                 });
             }
-            ctx.draw(&CanvasLine {
-                x1: playhead_x,
-                y1: 0.0,
-                x2: playhead_x,
-                y2: sh as f64,
-                color: PLAYHEAD,
-            });
+            if let Some(px) = playhead_x {
+                ctx.draw(&CanvasLine {
+                    x1: px,
+                    y1: 0.0,
+                    x2: px,
+                    y2: sh as f64,
+                    color: PLAYHEAD,
+                });
+            }
         });
     frame.render_widget(canvas, area);
 }
