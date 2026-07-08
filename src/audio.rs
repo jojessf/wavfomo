@@ -147,10 +147,7 @@ impl Engine {
             .map_err(|e| AudioError::new(format!("cannot open audio device: {e}")))?;
         let player = Player::connect_new(sink.mixer());
 
-        let file = File::open(path)
-            .map_err(|e| AudioError::new(format!("cannot open '{}': {}", path.display(), e)))?;
-        let decoder = Decoder::try_from(file)
-            .map_err(|e| AudioError::new(format!("cannot decode '{}': {e}", path.display())))?;
+        let decoder = Self::open_decoder(path)?;
         player.append(decoder);
         player.pause();
 
@@ -166,12 +163,49 @@ impl Engine {
         })
     }
 
+    /// Build a fresh decoder for the loaded file.
+    fn open_decoder(path: &Path) -> Result<Decoder<std::io::BufReader<File>>, AudioError> {
+        let file = File::open(path)
+            .map_err(|e| AudioError::new(format!("cannot open '{}': {}", path.display(), e)))?;
+        Decoder::try_from(file)
+            .map_err(|e| AudioError::new(format!("cannot decode '{}': {e}", path.display())))
+    }
+
+    /// True once playback has run past the end of the track: the queue has
+    /// drained, so seeking and play/pause no longer have a source to act on
+    /// until we re-queue one.
+    pub fn finished(&self) -> bool {
+        self.player.empty()
+    }
+
+    /// Re-queue a fresh decoder after the track has finished, restoring volume
+    /// and optionally seeking to `pos`. `play` resumes immediately when true.
+    fn requeue(&self, pos: Duration, play: bool) {
+        let Ok(decoder) = Self::open_decoder(&self.path) else {
+            return;
+        };
+        self.player.append(decoder);
+        self.player
+            .set_volume(if self.muted { 0.0 } else { self.volume });
+        if play {
+            self.player.play();
+        } else {
+            self.player.pause();
+        }
+        if pos > Duration::ZERO {
+            let _ = self.player.try_seek(pos);
+        }
+    }
+
     pub fn is_paused(&self) -> bool {
         self.player.is_paused()
     }
 
     pub fn toggle_pause(&self) {
-        if self.player.is_paused() {
+        if self.finished() {
+            // Nothing left in the queue — restart the track from the top.
+            self.requeue(Duration::ZERO, true);
+        } else if self.player.is_paused() {
             self.player.play();
         } else {
             self.player.pause();
@@ -180,6 +214,10 @@ impl Engine {
 
     /// Stop: pause and return to the start of the track.
     pub fn stop(&self) {
+        if self.finished() {
+            self.requeue(Duration::ZERO, false);
+            return;
+        }
         let _ = self.player.try_seek(Duration::ZERO);
         self.player.pause();
     }
@@ -192,7 +230,31 @@ impl Engine {
     pub fn seek_relative(&self, delta_secs: f32, total: Duration) {
         let cur = self.player.get_pos().as_secs_f32();
         let target = (cur + delta_secs).clamp(0.0, total.as_secs_f32());
-        let _ = self.player.try_seek(Duration::from_secs_f32(target));
+        let target = Duration::from_secs_f32(target);
+        if self.finished() {
+            // Ran off the end — re-queue before seeking so the position sticks,
+            // staying paused so completed playback doesn't spontaneously resume.
+            self.requeue(target, false);
+        } else {
+            let _ = self.player.try_seek(target);
+        }
+    }
+
+    /// Jump to the start of the track, preserving the current play/pause state.
+    pub fn seek_to_start(&self) {
+        if self.finished() {
+            // Re-queue paused so a completed track doesn't resume on its own.
+            self.requeue(Duration::ZERO, false);
+        } else {
+            let _ = self.player.try_seek(Duration::ZERO);
+        }
+    }
+
+    /// Jump to the end of the track. Nothing to do if it already finished.
+    pub fn seek_to_end(&self, total: Duration) {
+        if !self.finished() {
+            let _ = self.player.try_seek(total);
+        }
     }
 
     pub fn volume_percent(&self) -> u8 {
