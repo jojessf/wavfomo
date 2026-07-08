@@ -2,7 +2,9 @@
 
 A terminal audio player written in Rust. Play audio files from the command line
 with real-time waveform and spectrograph visualizers, transport controls, and
-keyboard-driven navigation — all inside the terminal.
+keyboard-driven navigation.  Ratatui time, in the terminal, because gay.
+
+NOTICE: This is a slop project.
 
 # Cat's eye view
 ![example0](res/maim.20260708.015254.521913516.1783489974_appscap.png)
