@@ -16,12 +16,19 @@ use crate::ui;
 const VOLUME_STEP: i32 = 5;
 const ZOOM_FACTOR: f32 = 1.1;
 const TICK: Duration = Duration::from_millis(50);
+/// Resolution of the precomputed waveform peak summary. Generous relative to any
+/// terminal width so a zoomed-out view keeps plenty of min/max detail; past this
+/// zoom the renderer falls back to scanning the (now small) visible window.
+const WAVE_PEAK_RES: usize = 1 << 15; // 32768 buckets (~256 KB)
 
 pub struct App {
     pub config: Config,
     pub audio: AudioData,
     pub engine: Engine,
     pub spectrogram: Option<Spectrogram>,
+    /// Full-track (min, max) peak summary the waveform renderer downsamples
+    /// from, so drawing never rescans the raw mono buffer. See [`WAVE_PEAK_RES`].
+    pub wave_peaks: Vec<(f32, f32)>,
     /// Horizontal zoom factor, 1.0 == fit whole file.
     pub zoom: f32,
     pub vertical_scale: f32,
@@ -94,6 +101,9 @@ impl App {
             None
         };
 
+        // One O(len) pass now buys O(columns) waveform draws forever after.
+        let wave_peaks = dsp::peak_summary(&audio.mono, WAVE_PEAK_RES);
+
         let engine = Engine::new(path, config.audio.volume)?;
 
         let zoom = match config.waveform.zoom {
@@ -107,6 +117,7 @@ impl App {
             audio,
             engine,
             spectrogram,
+            wave_peaks,
             zoom,
             vertical_scale,
             goto: None,

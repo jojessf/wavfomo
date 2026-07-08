@@ -210,7 +210,7 @@ fn draw_waveform_block(frame: &mut Frame, area: Rect, app: &App) {
 
     let (start, end) = app.visible_range();
     let cols = inner.width as usize;
-    let peaks = dsp::waveform_peaks(&app.audio.mono, start, end, cols);
+    let peaks = dsp::waveform_peaks_view(&app.audio.mono, &app.wave_peaks, start, end, cols);
 
     let mid = inner.y + inner.height / 2;
     let half = (inner.height / 2).max(1) as f32;
@@ -246,7 +246,7 @@ fn draw_waveform_canvas(frame: &mut Frame, area: Rect, app: &App, marker: Marker
     let (start, end) = app.visible_range();
     // Oversample horizontally so Braille's 2-per-cell resolution is used.
     let res = inner_w as usize * marker_res(marker).0;
-    let peaks = dsp::waveform_peaks(&app.audio.mono, start, end, res);
+    let peaks = dsp::waveform_peaks_view(&app.audio.mono, &app.wave_peaks, start, end, res);
     let vscale = app.vertical_scale;
 
     // Playhead x in canvas coordinates, if it falls in the visible window.
