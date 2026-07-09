@@ -202,6 +202,7 @@ pub struct HotkeysConfig {
     pub volume_up: String,
     pub volume_down: String,
     pub mute: String,
+    pub menu: String,
     pub quit: String,
 }
 
@@ -226,6 +227,7 @@ impl Default for HotkeysConfig {
             volume_up: "Up".into(),
             volume_down: "Down".into(),
             mute: "m".into(),
+            menu: "F1".into(),
             quit: "q".into(),
         }
     }
@@ -252,6 +254,7 @@ impl HotkeysConfig {
             (self.volume_up.clone(), Action::VolumeUp),
             (self.volume_down.clone(), Action::VolumeDown),
             (self.mute.clone(), Action::Mute),
+            (self.menu.clone(), Action::ToggleMenu),
             (self.quit.clone(), Action::Quit),
         ]
     }

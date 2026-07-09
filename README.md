@@ -77,6 +77,7 @@ These are the built-in defaults. Every binding can be remapped in the
 
 | Key                     | Action                                                        |
 | ----------------------- | ------------------------------------------------------------- |
+| `F1`                    | Toggle the menu / keybindings overlay (`Esc` also closes it)   |
 | `Space`                 | Play / pause                                                  |
 | `s`                     | Stop (return to start)                                        |
 | `←` / `→`               | Seek the playhead (±1s, normal step)                          |
@@ -210,6 +211,7 @@ vscale_decrease     = "Alt+Down"
 volume_up           = "Up"
 volume_down         = "Down"
 mute                = "m"
+menu                = "F1"
 quit                = "q"
 # next_track / prev_track — FUTURE (no playlist yet)
 ```

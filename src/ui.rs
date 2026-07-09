@@ -9,7 +9,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::symbols::Marker;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::canvas::{Canvas, Line as CanvasLine, Points};
-use ratatui::widgets::{Block, Borders, Gauge, Paragraph};
+use ratatui::widgets::{Block, Borders, Clear, Gauge, Paragraph};
 use ratatui::Frame;
 
 use crate::app::App;
@@ -75,6 +75,86 @@ pub fn render(frame: &mut Frame, app: &App) {
     } else if let Some(a) = spec_area {
         draw_time_axis(frame, a.x + 1, a.width.saturating_sub(2), a.y, app);
     }
+
+    // The help/menu overlay draws last so it sits on top of every pane.
+    if app.menu_open {
+        draw_menu(frame, area, app);
+    }
+}
+
+/// Centered help overlay listing the current keybindings. Reflects the actual
+/// configured hotkeys so remaps stay accurate. Toggled with F1 (or Esc).
+fn draw_menu(frame: &mut Frame, area: Rect, app: &App) {
+    let hk = &app.config.hotkeys;
+    let pair = |a: &str, b: &str| format!("{a} / {b}");
+    // (keys, description) rows, mirroring the footer hints.
+    let rows: Vec<(String, &str)> = vec![
+        (hk.play_pause.clone(), "play / pause"),
+        (hk.stop.clone(), "stop"),
+        (pair(&hk.seek_back, &hk.seek_forward), "seek"),
+        (pair(&hk.seek_back_large, &hk.seek_forward_large), "seek ± large"),
+        (pair(&hk.seek_back_fine, &hk.seek_forward_fine), "seek ± fine"),
+        (pair(&hk.seek_start, &hk.seek_end), "start / end"),
+        (hk.goto.clone(), "goto timestamp"),
+        (pair(&hk.waveform_zoom_in, &hk.waveform_zoom_out), "zoom in / out"),
+        (pair(&hk.vscale_increase, &hk.vscale_decrease), "vscale up / down"),
+        (pair(&hk.volume_up, &hk.volume_down), "volume up / down"),
+        (hk.mute.clone(), "mute"),
+        (hk.quit.clone(), "quit"),
+    ];
+
+    // Column widths: the widest key string sets the gutter.
+    let key_w = rows.iter().map(|(k, _)| k.chars().count()).max().unwrap_or(0);
+    let key_style = Style::default().fg(Color::Indexed(180)).add_modifier(Modifier::BOLD);
+    let desc_style = Style::default().fg(Color::Indexed(250));
+
+    let mut lines: Vec<Line> = rows
+        .iter()
+        .map(|(k, d)| {
+            Line::from(vec![
+                Span::styled(format!("{k:<key_w$}"), key_style),
+                Span::raw("   "),
+                Span::styled(*d, desc_style),
+            ])
+        })
+        .collect();
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        format!("{}  or  Esc  to close", hk.menu),
+        Style::default().fg(Color::Indexed(240)),
+    )));
+
+    // Size the box to the content, then center it (clamped to the screen).
+    let content_w = rows.iter().map(|(_, d)| key_w + 3 + d.chars().count()).max().unwrap_or(0);
+    let inner_w = content_w.max(22) as u16;
+    let box_w = (inner_w + 4).min(area.width); // 2 border + 2 padding
+    let box_h = (lines.len() as u16 + 2).min(area.height); // + top/bottom border
+    let rect = centered_rect(box_w, box_h, area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Indexed(45)))
+        .title(" menu · keybindings ");
+    let inner = block.inner(rect);
+    // Clear whatever was underneath so the panel is fully opaque.
+    frame.render_widget(Clear, rect);
+    frame.render_widget(block, rect);
+    // One column of left padding inside the border.
+    let padded = Rect {
+        x: inner.x + 1,
+        width: inner.width.saturating_sub(1),
+        ..inner
+    };
+    frame.render_widget(Paragraph::new(lines), padded);
+}
+
+/// A `w`×`h` rectangle centered within `area`, clamped to fit.
+fn centered_rect(w: u16, h: u16, area: Rect) -> Rect {
+    let w = w.min(area.width);
+    let h = h.min(area.height);
+    let x = area.x + (area.width - w) / 2;
+    let y = area.y + (area.height - h) / 2;
+    Rect { x, y, width: w, height: h }
 }
 
 /// Draw evenly spaced `m:ss` labels across a border row, spanning the currently
@@ -518,7 +598,7 @@ fn draw_footer(frame: &mut Frame, area: Rect, app: &App) {
         return;
     }
 
-    let hint = "Space play/pause  ·  s stop  ·  ←→ seek (Shift ±10s, Alt ±0.1s)  ·  Home/End start/end  ·  g goto  ·  ↑↓ vol  ·  Ctrl+PgUp/PgDn zoom  ·  Alt+↑↓ vscale  ·  m mute  ·  q quit";
+    let hint = "F1 menu  ·  Space play/pause  ·  s stop  ·  ←→ seek (Shift ±10s, Alt ±0.1s)  ·  Home/End start/end  ·  g goto  ·  ↑↓ vol  ·  Ctrl+PgUp/PgDn zoom  ·  Alt+↑↓ vscale  ·  m mute  ·  q quit";
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
             hint,

@@ -143,8 +143,10 @@ pub struct Engine {
 impl Engine {
     /// Open the default device and queue the file, starting paused.
     pub fn new(path: &Path, volume_percent: u8) -> Result<Self, AudioError> {
-        let sink = rodio::DeviceSinkBuilder::open_default_sink()
+        let mut sink = rodio::DeviceSinkBuilder::open_default_sink()
             .map_err(|e| AudioError::new(format!("cannot open audio device: {e}")))?;
+        // We stop playback intentionally on quit; silence rodio's drop warning.
+        sink.log_on_drop(false);
         let player = Player::connect_new(sink.mixer());
 
         let decoder = Self::open_decoder(path)?;

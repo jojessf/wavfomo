@@ -34,6 +34,8 @@ pub struct App {
     pub vertical_scale: f32,
     /// Active "goto timestamp" prompt, if the user is typing one.
     pub goto: Option<GotoInput>,
+    /// Whether the F1 help/menu overlay is currently shown.
+    pub menu_open: bool,
     keymap: Keymap,
     should_quit: bool,
 }
@@ -121,6 +123,7 @@ impl App {
             zoom,
             vertical_scale,
             goto: None,
+            menu_open: false,
             keymap,
             should_quit: false,
         })
@@ -166,6 +169,15 @@ impl App {
 
     fn handle_key(&mut self, key: KeyEvent) {
         if key.kind == KeyEventKind::Release {
+            return;
+        }
+        // While the help/menu overlay is open it captures input: Esc or the
+        // menu key close it, everything else is swallowed so the panel stays put.
+        if self.menu_open {
+            let entry = hotkeys::normalize(key.code, key.modifiers);
+            if key.code == KeyCode::Esc || self.keymap.get(&entry) == Some(&Action::ToggleMenu) {
+                self.menu_open = false;
+            }
             return;
         }
         // While the goto prompt is open, keystrokes edit its text instead of
@@ -245,6 +257,8 @@ impl App {
 
             Action::VolumeUp => self.engine.adjust_volume(VOLUME_STEP),
             Action::VolumeDown => self.engine.adjust_volume(-VOLUME_STEP),
+
+            Action::ToggleMenu => self.menu_open = !self.menu_open,
         }
     }
 
