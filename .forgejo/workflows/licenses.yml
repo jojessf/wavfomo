@@ -1,0 +1,35 @@
+# Forgejo Actions: enforce the dependency license policy (deny.toml) on any
+# change to the dependency graph. Forgejo reads GitHub-Actions-compatible
+# workflows from .forgejo/workflows/.
+#
+# Assumptions to confirm for your instance:
+#   - `runs-on` must match a label your act_runner advertises. `ubuntu-latest`
+#     is the common default; change it if your runner uses another (e.g.
+#     `docker`, or a self-hosted label).
+#   - The runner must be able to resolve the `uses:` actions below (act_runner
+#     fetches them from github.com by default).
+name: licenses
+
+on:
+  push:
+    paths:
+      - Cargo.toml
+      - Cargo.lock
+      - deny.toml
+      - .forgejo/workflows/licenses.yml
+  pull_request:
+    paths:
+      - Cargo.toml
+      - Cargo.lock
+      - deny.toml
+  workflow_dispatch: {}
+
+jobs:
+  cargo-deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Self-contained: this action bundles cargo-deny, no toolchain setup needed.
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check licenses
