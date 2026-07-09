@@ -1,6 +1,7 @@
 # wavfomo
 
-A terminal audio player written in Rust. Play audio files from the command line
+This is AI Slop, and I should feel bad.  
+A terminal audio player "written" in Rust. Play audio files from the command line
 with real-time waveform and spectrograph visualizers, transport controls, and
 keyboard-driven navigation.  Ratatui time, in the terminal, because gay.
 
