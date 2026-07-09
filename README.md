@@ -7,7 +7,9 @@ keyboard-driven navigation.  Ratatui time, in the terminal, because gay.
 NOTICE: This is a slop project.
 
 # Cat's eye view
-![example0](res/maim.20260708.015254.521913516.1783489974_appscap.png)
+![zoomedin](res/maim.20260709.131857.632688785.1783617537_v0.1.3_full.png)
+![spectonly](res/maim.20260709.131828.910029624.1783617508_v0.1.3_spect.png)
+![wavfonly](res/maim.20260709.131815.569426178.1783617495_v0.1.3_wavf.png)
 ![example1](res/maim.20260708.015320.141702496.1783490000_appscap.png)
 
 > **Status:** Early implementation. A working first version plays audio with
