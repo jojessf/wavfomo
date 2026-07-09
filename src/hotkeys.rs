@@ -30,6 +30,7 @@ pub enum Action {
     VolumeDown,
     Mute,
     ToggleMenu,
+    ToggleSettings,
     Quit,
 }
 

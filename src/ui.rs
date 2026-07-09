@@ -12,7 +12,7 @@ use ratatui::widgets::canvas::{Canvas, Line as CanvasLine, Points};
 use ratatui::widgets::{Block, Borders, Clear, Gauge, Paragraph};
 use ratatui::Frame;
 
-use crate::app::App;
+use crate::app::{App, SettingsItem};
 use crate::config::MarkerMode;
 use crate::dsp::{self};
 
@@ -32,12 +32,14 @@ pub fn render(frame: &mut Frame, app: &App) {
         && app.config.spectrograph.generate
         && app.spectrogram.is_some();
 
+    // Header/progress/footer take fixed rows; each visible pane splits the rest
+    // equally via Fill, so a lone pane expands to use all the leftover height.
     let mut constraints = vec![Constraint::Length(2), Constraint::Length(1)];
     if show_wave {
-        constraints.push(Constraint::Ratio(1, 2));
+        constraints.push(Constraint::Fill(1));
     }
     if show_spec {
-        constraints.push(Constraint::Ratio(1, 2));
+        constraints.push(Constraint::Fill(1));
     }
     constraints.push(Constraint::Length(1));
 
@@ -76,10 +78,95 @@ pub fn render(frame: &mut Frame, app: &App) {
         draw_time_axis(frame, a.x + 1, a.width.saturating_sub(2), a.y, app);
     }
 
-    // The help/menu overlay draws last so it sits on top of every pane.
+    // The overlays draw last so they sit on top of every pane.
     if app.menu_open {
         draw_menu(frame, area, app);
     }
+    if app.settings.is_some() {
+        draw_settings(frame, area, app);
+    }
+}
+
+/// Interactive settings overlay (F2): a cursor-driven list of visibility
+/// toggles for the waveform and spectrograph panes.
+fn draw_settings(frame: &mut Frame, area: Rect, app: &App) {
+    let Some(menu) = &app.settings else {
+        return;
+    };
+
+    // Per-row: current on/off state, plus whether the pane's data even exists
+    // (a toggle is inert if the pane was never generated).
+    let state = |item: SettingsItem| -> (bool, bool) {
+        match item {
+            SettingsItem::ShowWaveform => (
+                app.config.waveform.show,
+                app.config.waveform.generate,
+            ),
+            SettingsItem::ShowSpectrograph => (
+                app.config.spectrograph.show,
+                app.config.spectrograph.generate && app.spectrogram.is_some(),
+            ),
+        }
+    };
+
+    let cursor_style = Style::default().fg(Color::Indexed(231)).add_modifier(Modifier::BOLD);
+    let on_style = Style::default().fg(Color::Indexed(150));
+    let off_style = Style::default().fg(Color::Indexed(244));
+    let dim_style = Style::default().fg(Color::Indexed(240));
+
+    let mut lines: Vec<Line> = Vec::new();
+    for (i, &item) in SettingsItem::ALL.iter().enumerate() {
+        let (on, available) = state(item);
+        let selected = i == menu.cursor;
+        let pointer = if selected { "▶ " } else { "  " };
+        let check = if on { "[x]" } else { "[ ]" };
+        let label_style = if !available {
+            dim_style
+        } else if on {
+            on_style
+        } else {
+            off_style
+        };
+        let mut spans = vec![
+            Span::styled(pointer, cursor_style),
+            Span::styled(format!("{check} "), label_style),
+            Span::styled(item.label(), if selected { label_style.add_modifier(Modifier::BOLD) } else { label_style }),
+        ];
+        if !available {
+            spans.push(Span::styled("  (not generated)", dim_style));
+        }
+        lines.push(Line::from(spans));
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "↑↓ move · Space toggle · Esc close",
+        dim_style,
+    )));
+
+    // Width to fit the widest line; the "(not generated)" suffix is the longest.
+    let inner_w = lines
+        .iter()
+        .map(|l| l.width())
+        .max()
+        .unwrap_or(0)
+        .max(24) as u16;
+    let box_w = (inner_w + 4).min(area.width);
+    let box_h = (lines.len() as u16 + 2).min(area.height);
+    let rect = centered_rect(box_w, box_h, area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Indexed(45)))
+        .title(" settings ");
+    let inner = block.inner(rect);
+    frame.render_widget(Clear, rect);
+    frame.render_widget(block, rect);
+    let padded = Rect {
+        x: inner.x + 1,
+        width: inner.width.saturating_sub(1),
+        ..inner
+    };
+    frame.render_widget(Paragraph::new(lines), padded);
 }
 
 /// Centered help overlay listing the current keybindings. Reflects the actual
@@ -100,6 +187,7 @@ fn draw_menu(frame: &mut Frame, area: Rect, app: &App) {
         (pair(&hk.vscale_increase, &hk.vscale_decrease), "vscale up / down"),
         (pair(&hk.volume_up, &hk.volume_down), "volume up / down"),
         (hk.mute.clone(), "mute"),
+        (hk.settings.clone(), "settings (toggle panes)"),
         (hk.quit.clone(), "quit"),
     ];
 
@@ -598,7 +686,7 @@ fn draw_footer(frame: &mut Frame, area: Rect, app: &App) {
         return;
     }
 
-    let hint = "F1 menu  ·  Space play/pause  ·  s stop  ·  ←→ seek (Shift ±10s, Alt ±0.1s)  ·  Home/End start/end  ·  g goto  ·  ↑↓ vol  ·  Ctrl+PgUp/PgDn zoom  ·  Alt+↑↓ vscale  ·  m mute  ·  q quit";
+    let hint = "F1 menu  ·  F2 settings  ·  Space play/pause  ·  s stop  ·  ←→ seek (Shift ±10s, Alt ±0.1s)  ·  Home/End start/end  ·  g goto  ·  ↑↓ vol  ·  Ctrl+PgUp/PgDn zoom  ·  Alt+↑↓ vscale  ·  m mute  ·  q quit";
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
             hint,

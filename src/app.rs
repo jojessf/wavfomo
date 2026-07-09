@@ -36,8 +36,35 @@ pub struct App {
     pub goto: Option<GotoInput>,
     /// Whether the F1 help/menu overlay is currently shown.
     pub menu_open: bool,
+    /// State of the F2 interactive settings overlay, when open.
+    pub settings: Option<SettingsMenu>,
     keymap: Keymap,
     should_quit: bool,
+}
+
+/// The rows of the F2 settings overlay, in display order. Each maps to a
+/// boolean the menu toggles.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum SettingsItem {
+    ShowWaveform,
+    ShowSpectrograph,
+}
+
+impl SettingsItem {
+    pub const ALL: [SettingsItem; 2] = [SettingsItem::ShowWaveform, SettingsItem::ShowSpectrograph];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            SettingsItem::ShowWaveform => "waveform",
+            SettingsItem::ShowSpectrograph => "spectrograph",
+        }
+    }
+}
+
+/// Cursor state for the open settings overlay.
+pub struct SettingsMenu {
+    /// Index into [`SettingsItem::ALL`] of the highlighted row.
+    pub cursor: usize,
 }
 
 /// State for the inline "goto timestamp" text prompt (opened with `g`).
@@ -124,6 +151,7 @@ impl App {
             vertical_scale,
             goto: None,
             menu_open: false,
+            settings: None,
             keymap,
             should_quit: false,
         })
@@ -180,6 +208,12 @@ impl App {
             }
             return;
         }
+        // The settings overlay is interactive: it captures input to move the
+        // cursor and toggle rows until dismissed.
+        if self.settings.is_some() {
+            self.handle_settings_key(key);
+            return;
+        }
         // While the goto prompt is open, keystrokes edit its text instead of
         // triggering hotkeys.
         if self.goto.is_some() {
@@ -223,6 +257,47 @@ impl App {
         }
     }
 
+    /// Input for the open settings overlay: ↑↓ move the cursor, Space/Enter
+    /// toggle the highlighted row, Esc or the settings key close it.
+    fn handle_settings_key(&mut self, key: KeyEvent) {
+        let last = SettingsItem::ALL.len() - 1;
+        match key.code {
+            KeyCode::Up => {
+                if let Some(s) = self.settings.as_mut() {
+                    s.cursor = s.cursor.saturating_sub(1);
+                }
+            }
+            KeyCode::Down => {
+                if let Some(s) = self.settings.as_mut() {
+                    s.cursor = (s.cursor + 1).min(last);
+                }
+            }
+            KeyCode::Enter | KeyCode::Char(' ') => self.toggle_settings_item(),
+            KeyCode::Esc => self.settings = None,
+            _ => {
+                let entry = hotkeys::normalize(key.code, key.modifiers);
+                if self.keymap.get(&entry) == Some(&Action::ToggleSettings) {
+                    self.settings = None;
+                }
+            }
+        }
+    }
+
+    /// Flip the boolean the highlighted settings row controls.
+    fn toggle_settings_item(&mut self) {
+        let Some(s) = self.settings.as_ref() else {
+            return;
+        };
+        match SettingsItem::ALL[s.cursor] {
+            SettingsItem::ShowWaveform => {
+                self.config.waveform.show = !self.config.waveform.show
+            }
+            SettingsItem::ShowSpectrograph => {
+                self.config.spectrograph.show = !self.config.spectrograph.show
+            }
+        }
+    }
+
     fn dispatch(&mut self, action: Action) {
         let total = self.audio.duration;
         match action {
@@ -259,6 +334,12 @@ impl App {
             Action::VolumeDown => self.engine.adjust_volume(-VOLUME_STEP),
 
             Action::ToggleMenu => self.menu_open = !self.menu_open,
+            Action::ToggleSettings => {
+                self.settings = match self.settings {
+                    Some(_) => None,
+                    None => Some(SettingsMenu { cursor: 0 }),
+                }
+            }
         }
     }
 
